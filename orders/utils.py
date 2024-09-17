@@ -1,38 +1,52 @@
+# utils.py
+from io import BytesIO
+from django.http import HttpResponse
 from reportlab.lib.pagesizes import letter
 from reportlab.pdfgen import canvas
-from django.http import HttpResponse
-from .models import Order, OrderItem
+from reportlab.lib.units import inch
+from .models import Order
 
-def generate_invoice_pdf(order_id):
-    # Obtén el pedido y los elementos del pedido
+def create_invoice_pdf(order_id):
+    # Obtener el pedido
     order = Order.objects.get(id=order_id)
-    order_items = OrderItem.objects.filter(order=order)
     
-    # Crea un objeto de respuesta HTTP para devolver el archivo PDF
-    response = HttpResponse(content_type='application/pdf')
+    # Crear un buffer en memoria para el PDF
+    buffer = BytesIO()
+    
+    # Crear un objeto Canvas para el PDF
+    c = canvas.Canvas(buffer, pagesize=letter)
+    width, height = letter
+
+    # Títulos y detalles
+    c.drawString(1 * inch, height - 1 * inch, f"Invoice #{order.id}")
+    c.drawString(1 * inch, height - 1.5 * inch, f"Date: {order.created.strftime('%Y-%m-%d')}")
+    c.drawString(1 * inch, height - 2 * inch, f"Name: {order.first_name} {order.last_name}")
+    c.drawString(1 * inch, height - 2.5 * inch, f"Email: {order.email}")
+    c.drawString(1 * inch, height - 3 * inch, f"Address: {order.address}")
+    c.drawString(1 * inch, height - 3.5 * inch, f"Postal Code: {order.postal_code}")
+    c.drawString(1 * inch, height - 4 * inch, f"City: {order.city}")
+    
+    y_position = height - 5 * inch
+
+    c.drawString(1 * inch, y_position, "Order Details:")
+    y_position -= 0.5 * inch
+
+    for item in order.items.all():
+        c.drawString(1 * inch, y_position, f"{item.quantity}x {item.product.name} - ${item.price}")
+        y_position -= 0.25 * inch
+
+    c.drawString(1 * inch, y_position, f"Total: ${order.get_total_cost()}")
+
+    # Finalizar el PDF
+    c.showPage()
+    c.save()
+
+    # Obtener el contenido del PDF
+    pdf_content = buffer.getvalue()
+    buffer.close()
+
+    # Crear una respuesta HTTP para el archivo PDF
+    response = HttpResponse(pdf_content, content_type='application/pdf')
     response['Content-Disposition'] = f'attachment; filename="invoice_{order_id}.pdf"'
-    
-    # Crea un documento PDF
-    p = canvas.Canvas(response, pagesize=letter)
-    
-    # Dibuja el encabezado de la factura
-    p.drawString(100, 750, f"Invoice for Order #{order_id}")
-    p.drawString(100, 735, f"Date: {order.created_at.strftime('%Y-%m-%d')}")
-    
-    # Dibuja los detalles del pedido
-    y = 700
-    for item in order_items:
-        p.drawString(100, y, f"Product: {item.product.name}")
-        p.drawString(300, y, f"Quantity: {item.quantity}")
-        p.drawString(400, y, f"Price: ${item.price:.2f}")
-        y -= 15
-    
-    # Dibuja el monto total
-    total = sum(item.price * item.quantity for item in order_items)
-    p.drawString(100, y - 30, f"Total: ${total:.2f}")
-    
-    # Finaliza el documento PDF
-    p.showPage()
-    p.save()
     
     return response
